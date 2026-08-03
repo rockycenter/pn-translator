@@ -168,11 +168,8 @@ class TranslatorApp:
 
         self.drop_frame.bind("<Button-1>", lambda e: self._select_file())
         self.drop_label.bind("<Button-1>", lambda e: self._select_file())
-        try:
-            self.root.drop_target_register("*")
-            self.root.dnd_bind('<<Drop>>', self._on_drop)
-        except Exception:
-            pass
+        # 拖拽功能仅 macOS 支持，Windows 自动降级为按钮选择
+        pass
 
         btn_frame = tk.Frame(card, bg=self.card)
         btn_frame.pack(fill="x", pady=(16, 0))
