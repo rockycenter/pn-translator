@@ -1,0 +1,28 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pandas openpyxl pyinstaller
+
+      - name: Build EXE
+        run: pyinstaller --onefile --windowed --name "料号翻译工具" --add-data "mapping.xlsx;." gui.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 料号翻译工具-Windows
+          path: dist/料号翻译工具.exe
