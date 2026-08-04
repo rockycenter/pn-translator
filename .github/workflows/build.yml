@@ -22,6 +22,7 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --clean --noconfirm `
             --icon "icons/icon.ico" `
+            --version-file "version_info.txt" `
             --name "料号翻译工具" `
             --add-data "mapping.xlsx;." `
             --add-data "icons/icon.ico;icons" `

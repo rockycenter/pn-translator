@@ -29,24 +29,33 @@ MAPPING_PATH = BASE_DIR / "mapping.xlsx"
 
 def load_mapping(path):
     """读取 mapping，构建双向映射：无论输入新料号还是旧料号，都能翻译。
+    同时读取 A/B 列（旧料号/新料号）和 J/K 列（Cross Reference/Spec Item）。
     重复项只保留第一条记录，避免被错误覆盖。"""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
     mapping = {}  # {part_number: (old, new)}
+
+    def add_pair(old_str, new_str):
+        if old_str not in mapping:
+            mapping[old_str] = (old_str, new_str)
+        if new_str not in mapping:
+            mapping[new_str] = (old_str, new_str)
+
     for row in ws.iter_rows(min_row=3, values_only=True):
-        if len(row) < 11:
-            continue
-        old_v = row[9]   # J 列
-        new_v = row[10]  # K 列
-        if old_v and new_v:
-            old_v = str(old_v).strip()
-            new_v = str(new_v).strip()
+        # A/B 列（旧料号 / 新料号）
+        if row[0] and row[1]:
+            old_v = str(row[0]).strip()
+            new_v = str(row[1]).strip()
             if old_v and new_v and new_v.lower() != "nan":
-                # 重复 key 只保留第一条（先到先得）
-                if old_v not in mapping:
-                    mapping[old_v] = (old_v, new_v)
-                if new_v not in mapping:
-                    mapping[new_v] = (old_v, new_v)
+                add_pair(old_v, new_v)
+
+        # J/K 列（Cross Reference / Spec Item）
+        if len(row) >= 11 and row[9] and row[10]:
+            old_v = str(row[9]).strip()
+            new_v = str(row[10]).strip()
+            if old_v and new_v and new_v.lower() != "nan":
+                add_pair(old_v, new_v)
+
     wb.close()
     return mapping
 
@@ -178,6 +187,220 @@ def translate_xls(report_path, output_path, progress_callback=None):
     return stats
 
 
+
+def add_old_pn_column(report_path, output_path, progress_callback=None):
+    """检测新料号占比 >90% 的列，左侧插入老料号列；
+    文件中其他散落的新料号则翻译为「老料号-新料号」格式。"""
+
+    if progress_callback:
+        progress_callback("加载对照表...")
+    mapping = load_mapping(MAPPING_PATH)
+
+    def is_new_pn(val_str):
+        """判断是否为新料号（在 mapping 中且 new != old）"""
+        if val_str in mapping:
+            old_v, new_v = mapping[val_str]
+            return new_v == val_str and old_v != new_v
+        return False
+
+    def get_old_pn(val_str):
+        """获取老料号"""
+        if val_str in mapping:
+            return mapping[val_str][0]
+        return None
+
+    is_xls = report_path.lower().endswith('.xls') and not report_path.lower().endswith('.xlsx')
+
+    if is_xls:
+        if progress_callback:
+            progress_callback("正在读取 .xls 文件...")
+        wb_in = xlrd.open_workbook(report_path)
+        wb_out = openpyxl.Workbook()
+        wb_out.remove(wb_out.active)
+        total_sheets = wb_in.nsheets
+        total_cols_added = 0
+        total_translated = 0
+
+        for si in range(total_sheets):
+            ws_in = wb_in.sheet_by_index(si)
+            if progress_callback:
+                progress_callback(f"处理中... ({si+1}/{total_sheets})")
+
+            ws_out = wb_out.create_sheet(title=ws_in.name[:31])
+
+            # 先复制原数据
+            for r in range(ws_in.nrows):
+                for c in range(ws_in.ncols):
+                    ct = ws_in.cell_type(r, c)
+                    cv = ws_in.cell_value(r, c)
+                    if ct == xlrd.XL_CELL_EMPTY:
+                        continue
+                    elif ct == xlrd.XL_CELL_NUMBER:
+                        ws_out.cell(row=r+1, column=c+1).value = cv
+                    elif ct == xlrd.XL_CELL_DATE:
+                        import datetime
+                        dt = xlrd.xldate_as_datetime(cv, wb_in.datemode)
+                        ws_out.cell(row=r+1, column=c+1).value = dt
+                    elif ct == xlrd.XL_CELL_BOOLEAN:
+                        ws_out.cell(row=r+1, column=c+1).value = bool(cv)
+                    else:
+                        ws_out.cell(row=r+1, column=c+1).value = str(cv) if cv else None
+
+            # 第一遍：找出新料号 >90% 的列
+            high_pn_cols = set()
+            for col_idx in range(ws_in.ncols):
+                total = 0
+                new_cnt = 0
+                for row_idx in range(ws_in.nrows):
+                    ct = ws_in.cell_type(row_idx, col_idx)
+                    if ct != xlrd.XL_CELL_TEXT:
+                        continue
+                    cv = str(ws_in.cell_value(row_idx, col_idx)).strip()
+                    if not cv:
+                        continue
+                    total += 1
+                    if is_new_pn(cv):
+                        new_cnt += 1
+                if total > 0 and (new_cnt / total) > 0.9:
+                    high_pn_cols.add(col_idx)
+
+            total_cols_added += len(high_pn_cols)
+
+            # 从右往左插入老料号列
+            sorted_cols = sorted(high_pn_cols, reverse=True)
+            for col_idx in sorted_cols:
+                insert_pos = col_idx + 1  # 1-based
+                ws_out.insert_cols(insert_pos)
+                ws_out.cell(row=1, column=insert_pos).value = "老料号"
+                for row_idx in range(ws_in.nrows):
+                    src_cell = ws_out.cell(row=row_idx+1, column=insert_pos+1)
+                    src_val = src_cell.value
+                    if src_val is None:
+                        continue
+                    src_str = str(src_val).strip()
+                    if not src_str:
+                        continue
+                    old_pn = get_old_pn(src_str)
+                    if old_pn:
+                        ws_out.cell(row=row_idx+1, column=insert_pos).value = old_pn
+                    else:
+                        ws_out.cell(row=row_idx+1, column=insert_pos).value = src_str
+
+            # 构建「已处理列」集合（新列 + 原始列）
+            processed_cols = set()
+            shift = 0
+            for orig_col in sorted(high_pn_cols):
+                processed_cols.add(orig_col + shift + 1)      # 新插入的老料号列
+                processed_cols.add(orig_col + shift + 2)      # 原始列
+                shift += 1
+
+            # 第二遍：其他列中的新料号 → "老料号-新料号"
+            max_col_out = ws_out.max_column
+            for col_idx in range(1, max_col_out + 1):
+                if col_idx in processed_cols:
+                    continue
+                for row_idx in range(1, ws_in.nrows + 1):
+                    cell = ws_out.cell(row=row_idx, column=col_idx)
+                    cv = cell.value
+                    if cv is None:
+                        continue
+                    cv_str = str(cv).strip()
+                    if not cv_str:
+                        continue
+                    if is_new_pn(cv_str):
+                        old_v, new_v = mapping[cv_str]
+                        cell.value = f"{old_v}-{new_v}"
+                        total_translated += 1
+
+        wb_out.save(output_path)
+        return {"sheets": total_sheets, "columns_added": total_cols_added, "translated": total_translated}
+
+    else:
+        # .xlsx: 用 openpyxl
+        if progress_callback:
+            progress_callback("正在读取 .xlsx 文件...")
+        wb = openpyxl.load_workbook(report_path)
+        total_sheets = len(wb.worksheets)
+        total_cols_added = 0
+        total_translated = 0
+
+        for si, ws in enumerate(wb.worksheets):
+            if progress_callback:
+                progress_callback(f"处理中... ({si+1}/{total_sheets})")
+
+            max_col = ws.max_column
+            max_row = ws.max_row
+
+            # 第一遍：找出新料号 >90% 的列
+            high_pn_cols = set()
+            for col_idx in range(1, max_col + 1):
+                total = 0
+                new_cnt = 0
+                for row_idx in range(1, max_row + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cv = cell.value
+                    if cv is None:
+                        continue
+                    cv_str = str(cv).strip()
+                    if not cv_str:
+                        continue
+                    total += 1
+                    if is_new_pn(cv_str):
+                        new_cnt += 1
+                if total > 0 and (new_cnt / total) > 0.9:
+                    high_pn_cols.add(col_idx)
+
+            total_cols_added += len(high_pn_cols)
+
+            # 从右往左插入老料号列
+            sorted_cols = sorted(high_pn_cols, reverse=True)
+            for col_idx in sorted_cols:
+                ws.insert_cols(col_idx)
+                ws.cell(row=1, column=col_idx).value = "老料号"
+                for row_idx in range(2, max_row + 1):
+                    src_cell = ws.cell(row=row_idx, column=col_idx + 1)
+                    src_val = src_cell.value
+                    if src_val is None:
+                        continue
+                    src_str = str(src_val).strip()
+                    if not src_str:
+                        continue
+                    old_pn = get_old_pn(src_str)
+                    if old_pn:
+                        ws.cell(row=row_idx, column=col_idx).value = old_pn
+                    else:
+                        ws.cell(row=row_idx, column=col_idx).value = src_str
+
+            # 构建「已处理列」集合
+            processed_cols = set()
+            shift = 0
+            for orig_col in sorted(high_pn_cols):
+                processed_cols.add(orig_col + shift)      # 新插入的老料号列
+                processed_cols.add(orig_col + shift + 1)  # 原始列
+                shift += 1
+
+            # 第二遍：其他列中的新料号 → "老料号-新料号"
+            new_max_col = ws.max_column
+            for col_idx in range(1, new_max_col + 1):
+                if col_idx in processed_cols:
+                    continue
+                for row_idx in range(1, max_row + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cv = cell.value
+                    if cv is None:
+                        continue
+                    cv_str = str(cv).strip()
+                    if not cv_str:
+                        continue
+                    if is_new_pn(cv_str):
+                        old_v, new_v = mapping[cv_str]
+                        cell.value = f"{old_v}-{new_v}"
+                        total_translated += 1
+
+        wb.save(output_path)
+        return {"sheets": total_sheets, "columns_added": total_cols_added, "translated": total_translated}
+
+
 # ── GUI ────────────────────────────────────────────────────────────
 class TranslatorApp:
     def __init__(self, root):
@@ -217,7 +440,7 @@ class TranslatorApp:
                          fg=self.text, bg=self.bg)
         title.pack(pady=(30, 4))
 
-        version = tk.Label(self.root, text="V1.3",
+        version = tk.Label(self.root, text="V1.4",
                            font=("Microsoft YaHei UI", 9),
                            fg=self.sub, bg=self.bg)
         version.pack(pady=(0, 6))
@@ -276,6 +499,19 @@ class TranslatorApp:
                                        command=self._translate)
         self.translate_btn.pack(side="right")
 
+        self.add_col_btn = tk.Button(btn_frame, text="增加老料号列",
+                                     font=("Microsoft YaHei UI", 11, "bold"),
+                                     bg="#34c759", fg="white",
+                                     activebackground="#28a745",
+                                     activeforeground="white",
+                                     disabledforeground="white",
+                                     relief="flat", padx=16, pady=8,
+                                     borderwidth=0,
+                                     highlightthickness=0,
+                                     state="disabled",
+                                     command=self._add_old_column)
+        self.add_col_btn.pack(side="right", padx=(0, 8))
+
         # 署名行
         signature = tk.Label(card,
                             text="ROCKYCENTER PRODUCTION",
@@ -299,6 +535,50 @@ class TranslatorApp:
             self.file_path = path
             self.file_label.config(text=f"✅  {os.path.basename(path)}")
             self.translate_btn.config(state="normal")
+            self.add_col_btn.config(state="normal")
+
+    def _add_old_column(self):
+        if not self.file_path:
+            return
+        default_out = self.file_path.rsplit('.', 1)[0] + '_with_oldpn.xlsx'
+        output_path = filedialog.asksaveasfilename(
+            title="保存结果",
+            defaultextension=".xlsx",
+            initialfile=os.path.basename(default_out),
+            filetypes=[("Excel 文件", "*.xlsx")]
+        )
+        if not output_path:
+            return
+
+        self.translate_btn.config(state="disabled")
+        self.add_col_btn.config(state="disabled", text="处理中...")
+        self.select_btn.config(state="disabled")
+        self.progress.pack(pady=(12, 0))
+        self.progress.start()
+
+        def done(result):
+            self.root.after(0, lambda: self._on_add_col_done(result, output_path))
+
+        def run():
+            try:
+                stats = add_old_pn_column(self.file_path, output_path,
+                                          progress_callback=lambda msg: None)
+                done(stats)
+            except Exception as e:
+                self.root.after(0, lambda: self._on_error(str(e)))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_add_col_done(self, result, output_path):
+        self.progress.stop()
+        self.progress.pack_forget()
+        self.translate_btn.config(state="normal")
+        self.add_col_btn.config(state="normal", text="增加老料号列")
+        self.select_btn.config(state="normal")
+        sheets = result.get("sheets", 0)
+        cols = result.get("columns_added", 0)
+        msg = f"完成！\n\n处理 Sheet 数：{sheets}\n新增老料号列：{cols} 列\n\n文件保存至：\n{output_path}"
+        messagebox.showinfo("处理完成", msg)
 
     def _on_drop(self, event):
         data = event.data
@@ -308,6 +588,7 @@ class TranslatorApp:
                 self.file_path = path
                 self.file_label.config(text=f"✅  {os.path.basename(path)}")
                 self.translate_btn.config(state="normal")
+                self.add_col_btn.config(state="normal")
 
     def _translate(self):
         if not self.file_path:
@@ -327,6 +608,7 @@ class TranslatorApp:
             return
 
         self.translate_btn.config(state="disabled", text="翻译中...")
+        self.add_col_btn.config(state="disabled")
         self.select_btn.config(state="disabled")
         self.progress.pack(pady=(12, 0))
         self.progress.start()
@@ -351,6 +633,7 @@ class TranslatorApp:
         self.progress.stop()
         self.progress.pack_forget()
         self.translate_btn.config(state="normal", text="开始翻译")
+        self.add_col_btn.config(state="normal", text="增加老料号列")
         self.select_btn.config(state="normal")
 
         t = stats.get("translated", 0)
@@ -366,6 +649,7 @@ class TranslatorApp:
         self.progress.stop()
         self.progress.pack_forget()
         self.translate_btn.config(state="normal", text="开始翻译")
+        self.add_col_btn.config(state="normal", text="增加老料号列")
         self.select_btn.config(state="normal")
         messagebox.showerror("翻译失败", f"发生错误：\n{err_msg}")
 
