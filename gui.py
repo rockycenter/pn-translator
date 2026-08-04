@@ -123,6 +123,13 @@ class TranslatorApp:
         self.root.geometry("520x450")
         self.root.resizable(False, False)
 
+        # 设置窗口图标
+        icon_path = BASE_DIR / "icons" / "icon.ico"
+        try:
+            self.root.iconbitmap(default=str(icon_path))
+        except Exception:
+            pass
+
         self.root.update_idletasks()
         w, h = 520, 450
         sw = root.winfo_screenwidth()

@@ -18,7 +18,7 @@ echo [1/3] 安装依赖...
 pip install pandas openpyxl pyinstaller -q
 
 echo [2/3] 打包中（约 1-2 分钟）...
-pyinstaller --onefile --windowed --icon "icons/icon.ico" --name "料号翻译工具" --add-data "mapping.xlsx;." gui.py
+pyinstaller --onefile --windowed --icon "icons/icon.ico" --name "料号翻译工具" --add-data "mapping.xlsx;." --add-data "icons/icon.ico;icons" gui.py
 
 echo [3/3] 完成！
 echo.

@@ -24,6 +24,7 @@ jobs:
             --icon "icons/icon.ico" `
             --name "料号翻译工具" `
             --add-data "mapping.xlsx;." `
+            --add-data "icons/icon.ico;icons" `
             --exclude-module pandas `
             --exclude-module numpy `
             --exclude-module PIL `
