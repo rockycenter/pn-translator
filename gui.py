@@ -217,7 +217,7 @@ class TranslatorApp:
                          fg=self.text, bg=self.bg)
         title.pack(pady=(30, 4))
 
-        version = tk.Label(self.root, text="V1.2",
+        version = tk.Label(self.root, text="V1.3",
                            font=("Microsoft YaHei UI", 9),
                            fg=self.sub, bg=self.bg)
         version.pack(pady=(0, 6))
