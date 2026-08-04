@@ -21,6 +21,7 @@ jobs:
       - name: Build EXE
         run: |
           pyinstaller --onefile --windowed --clean --noconfirm `
+            --icon "icons/icon.ico" `
             --name "料号翻译工具" `
             --add-data "mapping.xlsx;." `
             --exclude-module pandas `
