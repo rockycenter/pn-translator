@@ -16,7 +16,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install openpyxl pyinstaller
+        run: pip install openpyxl xlrd pyinstaller
 
       - name: Build EXE
         run: |
@@ -25,6 +25,7 @@ jobs:
             --name "料号翻译工具" `
             --add-data "mapping.xlsx;." `
             --add-data "icons/icon.ico;icons" `
+            --hidden-import xlrd `
             --exclude-module pandas `
             --exclude-module numpy `
             --exclude-module PIL `

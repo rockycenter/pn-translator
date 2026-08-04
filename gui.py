@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 import xml.etree.ElementTree as ET
 
 import openpyxl
+import xlrd
 
 # ── 内置 Mapping 路径 ─────────────────────────────────────────────
 if getattr(sys, 'frozen', False):
@@ -113,6 +114,68 @@ def translate_xlsx(report_path, output_path, progress_callback=None):
         return stats
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+def translate_xls(report_path, output_path, progress_callback=None):
+    """翻译 .xls 文件（Excel 97-2003 格式），输出为 .xlsx"""
+
+    if progress_callback:
+        progress_callback("加载对照表...")
+    mapping = load_mapping(MAPPING_PATH)
+
+    if progress_callback:
+        progress_callback("正在读取文件...")
+
+    # 用 xlrd 读取 .xls
+    wb_in = xlrd.open_workbook(report_path)
+
+    # 用 openpyxl 创建输出 .xlsx
+    wb_out = openpyxl.Workbook()
+    wb_out.remove(wb_out.active)
+
+    stats = {"translated": 0, "unchanged": 0, "not_found": 0}
+    total_sheets = wb_in.nsheets
+
+    for si in range(total_sheets):
+        ws_in = wb_in.sheet_by_index(si)
+
+        if progress_callback:
+            progress_callback(f"翻译中... ({si+1}/{total_sheets})")
+
+        ws_out = wb_out.create_sheet(title=ws_in.name[:31])  # Excel 限制 31 字符
+
+        for r in range(ws_in.nrows):
+            for c in range(ws_in.ncols):
+                cell_value = ws_in.cell_value(r, c)
+                cell_type = ws_in.cell_type(r, c)
+
+                if cell_type == xlrd.XL_CELL_TEXT and cell_value:
+                    original = str(cell_value).strip()
+                    if is_part_number(original) and original in mapping:
+                        old_val, new_val = mapping[original]
+                        if old_val != new_val:
+                            ws_out.cell(row=r+1, column=c+1).value = f"{old_val}-{new_val}"
+                            stats["translated"] += 1
+                        else:
+                            ws_out.cell(row=r+1, column=c+1).value = original
+                            stats["unchanged"] += 1
+                    else:
+                        ws_out.cell(row=r+1, column=c+1).value = original
+                elif cell_type == xlrd.XL_CELL_NUMBER:
+                    ws_out.cell(row=r+1, column=c+1).value = cell_value
+                elif cell_type == xlrd.XL_CELL_DATE:
+                    import datetime
+                    dt = xlrd.xldate_as_datetime(cell_value, wb_in.datemode)
+                    ws_out.cell(row=r+1, column=c+1).value = dt
+                elif cell_type == xlrd.XL_CELL_BOOLEAN:
+                    ws_out.cell(row=r+1, column=c+1).value = bool(cell_value)
+                elif cell_type == xlrd.XL_CELL_EMPTY:
+                    pass  # 空单元格，不写入
+                else:
+                    # 其他类型转字符串
+                    ws_out.cell(row=r+1, column=c+1).value = str(cell_value) if cell_value else None
+
+    wb_out.save(output_path)
+    return stats
 
 
 # ── GUI ────────────────────────────────────────────────────────────
@@ -230,7 +293,7 @@ class TranslatorApp:
     def _select_file(self):
         path = filedialog.askopenfilename(
             title="选择周报文件",
-            filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")]
+            filetypes=[("Excel 文件", "*.xlsx;*.xls"), ("所有文件", "*.*")]
         )
         if path:
             self.file_path = path
@@ -241,7 +304,7 @@ class TranslatorApp:
         data = event.data
         if data:
             path = data.strip().strip('{').strip('}')
-            if os.path.isfile(path) and path.endswith('.xlsx'):
+            if os.path.isfile(path) and (path.lower().endswith('.xlsx') or path.lower().endswith('.xls')):
                 self.file_path = path
                 self.file_label.config(text=f"✅  {os.path.basename(path)}")
                 self.translate_btn.config(state="normal")
@@ -249,7 +312,11 @@ class TranslatorApp:
     def _translate(self):
         if not self.file_path:
             return
-        default_out = self.file_path.replace('.xlsx', '_translated.xlsx')
+                if self.file_path.lower().endswith('.xls') and not self.file_path.lower().endswith('.xlsx'):
+            base = self.file_path.rsplit('.', 1)[0]
+            default_out = base + '_translated.xlsx'
+        else:
+            default_out = self.file_path.replace('.xlsx', '_translated.xlsx')
         output_path = filedialog.asksaveasfilename(
             title="保存翻译结果",
             defaultextension=".xlsx",
@@ -269,7 +336,11 @@ class TranslatorApp:
 
         def run():
             try:
-                stats = translate_xlsx(self.file_path, output_path)
+                is_xls = self.file_path.lower().endswith('.xls') and not self.file_path.lower().endswith('.xlsx')
+                if is_xls:
+                    stats = translate_xls(self.file_path, output_path, progress_callback=lambda msg: None)
+                else:
+                    stats = translate_xlsx(self.file_path, output_path)
                 done(stats)
             except Exception as e:
                 self.root.after(0, lambda: self._on_error(str(e)))
