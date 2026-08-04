@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>料号翻译工具</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --sub: #6e6e73;
+    --accent: #0071e3;
+    --border: #d2d2d7;
+    --green: #34c759;
+    --red: #ff3b30;
+    --radius: 16px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; padding: 20px;
+  }
+  .container { width: 100%; max-width: 520px; }
+  h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 8px; }
+  .subtitle { text-align: center; color: var(--sub); font-size: 15px; margin-bottom: 32px; }
+
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 28px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    margin-bottom: 16px;
+  }
+
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    margin-bottom: 20px;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(0,113,227,.04);
+  }
+  .drop-zone .icon { font-size: 40px; margin-bottom: 10px; }
+  .drop-zone .label { font-weight: 600; font-size: 16px; }
+  .drop-zone .hint { color: var(--sub); font-size: 13px; margin-top: 4px; }
+  .drop-zone input[type=file] { display: none; }
+  .drop-zone .file-name {
+    margin-top: 12px; font-size: 14px;
+    color: var(--accent); font-weight: 500;
+  }
+
+  .mapping-note {
+    font-size: 13px; color: var(--sub); text-align: center; margin-bottom: 0;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+
+  .btn {
+    display: block; width: 100%;
+    padding: 14px;
+    font-size: 17px; font-weight: 600;
+    border: none; border-radius: 12px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .btn-primary {
+    background: var(--accent); color: #fff;
+  }
+  .btn-primary:hover { opacity: .9; }
+  .btn-primary:disabled {
+    opacity: .4; cursor: not-allowed;
+  }
+
+  .result {
+    display: none; text-align: center; padding: 24px 0 8px;
+  }
+  .result.success .result-icon { color: var(--green); }
+  .result.error .result-icon { color: var(--red); }
+  .result-icon { font-size: 48px; margin-bottom: 8px; }
+  .result-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .result-detail { color: var(--sub); font-size: 14px; margin-bottom: 16px; }
+
+  .stats { display: flex; gap: 12px; justify-content: center; margin: 16px 0; }
+  .stat-item {
+    background: var(--bg); border-radius: 10px;
+    padding: 12px 20px; text-align: center; min-width: 80px;
+  }
+  .stat-num { font-size: 24px; font-weight: 700; }
+  .stat-label { font-size: 12px; color: var(--sub); }
+
+  .btn-download {
+    display: inline-block; background: var(--accent); color: #fff;
+    padding: 12px 32px; border-radius: 12px; font-weight: 600;
+    text-decoration: none; font-size: 16px; margin-top: 8px;
+  }
+  .btn-download:hover { opacity: .9; }
+
+  .spinner {
+    display: none;
+    width: 20px; height: 20px;
+    border: 2.5px solid rgba(255,255,255,.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    margin: 0 auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .btn-content { display: flex; align-items: center; justify-content: center; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📦 料号翻译工具</h1>
+  <p class="subtitle">将周报中的新料号自动翻译为「旧料号-新料号」格式</p>
+
+  <div class="card">
+    <!-- Report upload -->
+    <div class="drop-zone" id="reportZone" onclick="document.getElementById('reportInput').click()">
+      <div class="icon">📊</div>
+      <div class="label">上传周报文件</div>
+      <div class="hint">拖拽或点击上传 .xlsx 文件</div>
+      <div class="file-name" id="reportName"></div>
+    </div>
+    <input type="file" id="reportInput" accept=".xlsx" onchange="handleFile(this)">
+
+    <p class="mapping-note">🔗 对照表已内置，无需上传</p>
+
+    <!-- Translate button -->
+    <button class="btn btn-primary" id="translateBtn" disabled onclick="doTranslate()" style="margin-top:16px">
+      <span class="btn-content" id="btnContent">
+        <span id="btnText">开始翻译</span>
+        <span class="spinner" id="spinner"></span>
+      </span>
+    </button>
+
+    <!-- Result -->
+    <div class="result" id="result">
+      <div class="result-icon" id="resultIcon"></div>
+      <div class="result-title" id="resultTitle"></div>
+      <div class="result-detail" id="resultDetail"></div>
+      <div class="stats" id="stats"></div>
+      <a class="btn-download" id="downloadLink" href="#" style="display:none">⬇️ 下载翻译后的文件</a>
+    </div>
+  </div>
+</div>
+
+<script>
+let reportFile = null;
+
+function handleFile(input) {
+  reportFile = input.files[0];
+  if (reportFile) {
+    document.getElementById('reportName').textContent = '✅ ' + reportFile.name;
+  }
+  document.getElementById('translateBtn').disabled = !reportFile;
+}
+
+// Drag & drop
+const zone = document.getElementById('reportZone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  document.getElementById('reportInput').files = e.dataTransfer.files;
+  handleFile({ files: [file] });
+});
+
+async function doTranslate() {
+  if (!reportFile) return;
+
+  const btn = document.getElementById('translateBtn');
+  const btnText = document.getElementById('btnText');
+  const spinner = document.getElementById('spinner');
+  const result = document.getElementById('result');
+
+  btn.disabled = true;
+  btnText.textContent = '翻译中...';
+  spinner.style.display = 'inline-block';
+  result.style.display = 'none';
+
+  const formData = new FormData();
+  formData.append('report', reportFile);
+
+  try {
+    const resp = await fetch('/translate', { method: 'POST', body: formData });
+    const data = await resp.json();
+    result.style.display = 'block';
+
+    if (data.error) {
+      result.className = 'result error';
+      document.getElementById('resultIcon').textContent = '❌';
+      document.getElementById('resultTitle').textContent = '翻译失败';
+      document.getElementById('resultDetail').textContent = data.error;
+      document.getElementById('stats').innerHTML = '';
+      document.getElementById('downloadLink').style.display = 'none';
+    } else {
+      result.className = 'result success';
+      document.getElementById('resultIcon').textContent = '✅';
+      document.getElementById('resultTitle').textContent = '翻译完成！';
+      document.getElementById('resultDetail').textContent =
+        `共处理 ${data.stats.translated + data.stats.unchanged + data.stats.not_found} 个料号，格式：旧料号-新料号`;
+
+      document.getElementById('stats').innerHTML = `
+        <div class="stat-item">
+          <div class="stat-num" style="color:var(--accent)">${data.stats.translated}</div>
+          <div class="stat-label">已翻译</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">${data.stats.unchanged}</div>
+          <div class="stat-label">无需翻译</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num" style="color:${data.stats.not_found > 0 ? 'var(--red)' : 'inherit'}">${data.stats.not_found}</div>
+          <div class="stat-label">未找到</div>
+        </div>
+      `;
+
+      const dl = document.getElementById('downloadLink');
+      dl.href = '/download/' + data.filename;
+      dl.style.display = 'inline-block';
+    }
+  } catch (err) {
+    result.style.display = 'block';
+    result.className = 'result error';
+    document.getElementById('resultIcon').textContent = '❌';
+    document.getElementById('resultTitle').textContent = '请求失败';
+    document.getElementById('resultDetail').textContent = err.message;
+    document.getElementById('stats').innerHTML = '';
+    document.getElementById('downloadLink').style.display = 'none';
+  } finally {
+    btn.disabled = false;
+    btnText.textContent = '开始翻译';
+    spinner.style.display = 'none';
+  }
+}
+</script>
+</body>
+</html>

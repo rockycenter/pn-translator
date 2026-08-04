@@ -27,22 +27,27 @@ MAPPING_PATH = BASE_DIR / "mapping.xlsx"
 
 
 def load_mapping(path):
-    """用 openpyxl 读取 mapping（不依赖 pandas，减小 exe 体积）"""
+    """读取 mapping，构建双向映射：无论输入新料号还是旧料号，都能翻译。
+    重复项只保留第一条记录，避免被错误覆盖。"""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
-    new_to_old = {}
+    mapping = {}  # {part_number: (old, new)}
     for row in ws.iter_rows(min_row=3, values_only=True):
         if len(row) < 11:
             continue
-        old_v = row[9]   # J 列（0-based index 9）
+        old_v = row[9]   # J 列
         new_v = row[10]  # K 列
         if old_v and new_v:
             old_v = str(old_v).strip()
             new_v = str(new_v).strip()
             if old_v and new_v and new_v.lower() != "nan":
-                new_to_old[new_v] = old_v
+                # 重复 key 只保留第一条（先到先得）
+                if old_v not in mapping:
+                    mapping[old_v] = (old_v, new_v)
+                if new_v not in mapping:
+                    mapping[new_v] = (old_v, new_v)
     wb.close()
-    return new_to_old
+    return mapping
 
 
 def is_part_number(value):
@@ -59,7 +64,7 @@ def translate_xlsx(report_path, output_path, progress_callback=None):
 
     if progress_callback:
         progress_callback("加载对照表...")
-    new_to_old = load_mapping(MAPPING_PATH)
+    mapping = load_mapping(MAPPING_PATH)
 
     if progress_callback:
         progress_callback("正在翻译...")
@@ -85,10 +90,11 @@ def translate_xlsx(report_path, output_path, progress_callback=None):
             original = t_elem.text.strip()
             if not is_part_number(original):
                 continue
-            if original in new_to_old:
-                old_val = new_to_old[original]
-                if old_val != original:
-                    t_elem.text = f"{old_val}-{original}"
+            if original in mapping:
+                old_val, new_val = mapping[original]
+                if old_val != new_val:
+                    # 统一输出格式：旧料号-新料号
+                    t_elem.text = f"{old_val}-{new_val}"
                     t_elem.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
                     stats["translated"] += 1
                 else:
@@ -114,11 +120,11 @@ class TranslatorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("料号翻译工具")
-        self.root.geometry("520x420")
+        self.root.geometry("520x450")
         self.root.resizable(False, False)
 
         self.root.update_idletasks()
-        w, h = 520, 420
+        w, h = 520, 450
         sw = root.winfo_screenwidth()
         sh = root.winfo_screenheight()
         x = (sw - w) // 2
@@ -141,8 +147,13 @@ class TranslatorApp:
                          fg=self.text, bg=self.bg)
         title.pack(pady=(30, 4))
 
+        version = tk.Label(self.root, text="V1.2",
+                           font=("Microsoft YaHei UI", 9),
+                           fg=self.sub, bg=self.bg)
+        version.pack(pady=(0, 6))
+
         subtitle = tk.Label(self.root,
-                            text="拖入或选择周报文件，一键翻译为「旧料号-新料号」格式",
+                            text="拖入或选择你需要的文件，一键翻译为【旧料号-新料号】格式\n靶向治疗，拒绝内耗",
                             font=("Microsoft YaHei UI", 11),
                             fg=self.sub, bg=self.bg)
         subtitle.pack(pady=(0, 20))
@@ -156,7 +167,7 @@ class TranslatorApp:
         self.drop_frame.pack(fill="both", expand=True, ipady=30)
 
         self.drop_label = tk.Label(self.drop_frame,
-                                   text="📊  拖拽周报文件到此处\n或点击下方按钮选择",
+                                   text="点击选择你需要的文件",
                                    font=("Microsoft YaHei UI", 12),
                                    fg=self.sub, bg=self.card, justify="center")
         self.drop_label.pack(expand=True)
@@ -181,13 +192,27 @@ class TranslatorApp:
                                     command=self._select_file)
         self.select_btn.pack(side="left")
 
+        # 蓝底白字按钮
         self.translate_btn = tk.Button(btn_frame, text="开始翻译",
                                        font=("Microsoft YaHei UI", 12, "bold"),
                                        bg=self.accent, fg="white",
+                                       activebackground="#0062c4",
+                                       activeforeground="white",
+                                       disabledforeground="white",
                                        relief="flat", padx=24, pady=8,
+                                       borderwidth=0,
+                                       highlightthickness=0,
                                        state="disabled",
                                        command=self._translate)
         self.translate_btn.pack(side="right")
+
+        # 署名行
+        signature = tk.Label(card,
+                            text="ROCKYCENTER PRODUCTION",
+                            font=("Microsoft YaHei UI", 8),
+                            fg="#c7c7cc", bg=self.card,
+                            justify="center")
+        signature.pack(side="bottom", pady=(12, 0))
 
         self.progress = ttk.Progressbar(card, mode="indeterminate", length=400)
 
