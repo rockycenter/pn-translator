@@ -312,7 +312,7 @@ class TranslatorApp:
     def _translate(self):
         if not self.file_path:
             return
-                if self.file_path.lower().endswith('.xls') and not self.file_path.lower().endswith('.xlsx'):
+        if self.file_path.lower().endswith('.xls') and not self.file_path.lower().endswith('.xlsx'):
             base = self.file_path.rsplit('.', 1)[0]
             default_out = base + '_translated.xlsx'
         else:
