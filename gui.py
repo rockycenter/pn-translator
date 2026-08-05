@@ -188,7 +188,7 @@ def translate_xls(report_path, output_path, progress_callback=None):
 
 
 
-def add_old_pn_column(report_path, output_path, progress_callback=None):
+def add_old_pn_column(report_path, output_path, header_name="老料号", progress_callback=None):
     """检测新料号占比 >90% 的列，左侧插入老料号列；
     文件中其他散落的新料号则翻译为「老料号-新料号」格式。"""
 
@@ -271,7 +271,7 @@ def add_old_pn_column(report_path, output_path, progress_callback=None):
             for col_idx in sorted_cols:
                 insert_pos = col_idx + 1  # 1-based
                 ws_out.insert_cols(insert_pos)
-                ws_out.cell(row=1, column=insert_pos).value = "老料号"
+                ws_out.cell(row=1, column=insert_pos).value = header_name
                 for row_idx in range(ws_in.nrows):
                     src_cell = ws_out.cell(row=row_idx+1, column=insert_pos+1)
                     src_val = src_cell.value
@@ -356,7 +356,7 @@ def add_old_pn_column(report_path, output_path, progress_callback=None):
             sorted_cols = sorted(high_pn_cols, reverse=True)
             for col_idx in sorted_cols:
                 ws.insert_cols(col_idx)
-                ws.cell(row=1, column=col_idx).value = "老料号"
+                ws.cell(row=1, column=col_idx).value = header_name
                 for row_idx in range(2, max_row + 1):
                     src_cell = ws.cell(row=row_idx, column=col_idx + 1)
                     src_val = src_cell.value
@@ -402,11 +402,72 @@ def add_old_pn_column(report_path, output_path, progress_callback=None):
 
 
 # ── GUI ────────────────────────────────────────────────────────────
+class ColumnNameDialog:
+    """弹窗输入新增列的第一行名称"""
+    def __init__(self, parent):
+        self.result = None
+        self.top = tk.Toplevel(parent)
+        self.top.title("输入列名")
+        self.top.resizable(False, False)
+        self.top.configure(bg="#f5f5f7")
+        self.top.transient(parent)
+        self.top.grab_set()
+
+        # 居中
+        self.top.update_idletasks()
+        w, h = 340, 140
+        sw = parent.winfo_screenwidth()
+        sh = parent.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self.top.geometry(f"{w}x{h}+{x}+{y}")
+
+        label = tk.Label(self.top, text="请输入新增列的第一行名称：",
+                         font=("Microsoft YaHei UI", 11),
+                         fg="#1d1d1f", bg="#f5f5f7")
+        label.pack(pady=(20, 8))
+
+        self.entry = tk.Entry(self.top, font=("Microsoft YaHei UI", 12),
+                              width=24, justify="center")
+        self.entry.insert(0, "老料号")
+        self.entry.pack(pady=(0, 12))
+        self.entry.select_range(0, "end")
+        self.entry.focus_set()
+
+        btn_frame = tk.Frame(self.top, bg="#f5f5f7")
+        btn_frame.pack()
+
+        cancel_btn = tk.Button(btn_frame, text="取消",
+                               font=("Microsoft YaHei UI", 10),
+                               bg="#e8e8ed", fg="#1d1d1f",
+                               relief="flat", padx=16, pady=4,
+                               command=self._cancel)
+        cancel_btn.pack(side="left", padx=(0, 8))
+
+        ok_btn = tk.Button(btn_frame, text="确定",
+                           font=("Microsoft YaHei UI", 10, "bold"),
+                           bg="#0071e3", fg="white",
+                           relief="flat", padx=16, pady=4,
+                           command=self._ok)
+        ok_btn.pack(side="left")
+
+        self.top.bind("<Return>", lambda e: self._ok())
+        self.top.bind("<Escape>", lambda e: self._cancel())
+
+    def _ok(self):
+        self.result = self.entry.get()
+        self.top.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.top.destroy()
+
+
 class TranslatorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("料号翻译工具")
-        self.root.geometry("520x450")
+        self.root.geometry("520x480")
         self.root.resizable(False, False)
 
         # 设置窗口图标
@@ -417,7 +478,7 @@ class TranslatorApp:
             pass
 
         self.root.update_idletasks()
-        w, h = 520, 450
+        w, h = 520, 480
         sw = root.winfo_screenwidth()
         sh = root.winfo_screenheight()
         x = (sw - w) // 2
@@ -475,42 +536,48 @@ class TranslatorApp:
         # 拖拽功能仅 macOS 支持，Windows 自动降级为按钮选择
         pass
 
-        btn_frame = tk.Frame(card, bg=self.card)
-        btn_frame.pack(fill="x", pady=(16, 0))
+        # ── 选择文件按钮（独立一行） ──
+        select_frame = tk.Frame(card, bg=self.card)
+        select_frame.pack(fill="x", pady=(16, 8))
 
-        self.select_btn = tk.Button(btn_frame, text="选择文件",
+        self.select_btn = tk.Button(select_frame, text="选择文件",
                                     font=("Microsoft YaHei UI", 11),
                                     bg="#e8e8ed", fg=self.text,
                                     relief="flat", padx=20, pady=6,
                                     command=self._select_file)
-        self.select_btn.pack(side="left")
+        self.select_btn.pack()
 
-        # 蓝底白字按钮
-        self.translate_btn = tk.Button(btn_frame, text="开始翻译",
+        # ── 两个功能按钮（独立一行，等宽排列） ──
+        action_frame = tk.Frame(card, bg=self.card)
+        action_frame.pack(fill="x", pady=(0, 0))
+        action_frame.grid_columnconfigure(0, weight=1, uniform="action")
+        action_frame.grid_columnconfigure(1, weight=1, uniform="action")
+
+        self.add_col_btn = tk.Button(action_frame, text="A.增一列老料号",
+                                     font=("Microsoft YaHei UI", 12, "bold"),
+                                     bg="#34c759", fg="white",
+                                     activebackground="#28a745",
+                                     activeforeground="white",
+                                     disabledforeground="white",
+                                     relief="flat", padx=20, pady=10,
+                                     borderwidth=0,
+                                     highlightthickness=0,
+                                     state="disabled",
+                                     command=self._add_old_column)
+        self.add_col_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+
+        self.translate_btn = tk.Button(action_frame, text="B.原单元格翻译",
                                        font=("Microsoft YaHei UI", 12, "bold"),
                                        bg=self.accent, fg="white",
                                        activebackground="#0062c4",
                                        activeforeground="white",
                                        disabledforeground="white",
-                                       relief="flat", padx=24, pady=8,
+                                       relief="flat", padx=20, pady=10,
                                        borderwidth=0,
                                        highlightthickness=0,
                                        state="disabled",
                                        command=self._translate)
-        self.translate_btn.pack(side="right")
-
-        self.add_col_btn = tk.Button(btn_frame, text="增加老料号列",
-                                     font=("Microsoft YaHei UI", 11, "bold"),
-                                     bg="#34c759", fg="white",
-                                     activebackground="#28a745",
-                                     activeforeground="white",
-                                     disabledforeground="white",
-                                     relief="flat", padx=16, pady=8,
-                                     borderwidth=0,
-                                     highlightthickness=0,
-                                     state="disabled",
-                                     command=self._add_old_column)
-        self.add_col_btn.pack(side="right", padx=(0, 8))
+        self.translate_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
         # 署名行
         signature = tk.Label(card,
@@ -540,6 +607,15 @@ class TranslatorApp:
     def _add_old_column(self):
         if not self.file_path:
             return
+
+        # 弹窗让用户输入列名
+        dialog = ColumnNameDialog(self.root)
+        self.root.wait_window(dialog.top)
+        header_name = dialog.result
+        if header_name is None:
+            return
+        header_name = header_name.strip() or "老料号"
+
         default_out = self.file_path.rsplit('.', 1)[0] + '_with_oldpn.xlsx'
         output_path = filedialog.asksaveasfilename(
             title="保存结果",
@@ -562,6 +638,7 @@ class TranslatorApp:
         def run():
             try:
                 stats = add_old_pn_column(self.file_path, output_path,
+                                          header_name=header_name,
                                           progress_callback=lambda msg: None)
                 done(stats)
             except Exception as e:
@@ -573,7 +650,7 @@ class TranslatorApp:
         self.progress.stop()
         self.progress.pack_forget()
         self.translate_btn.config(state="normal")
-        self.add_col_btn.config(state="normal", text="增加老料号列")
+        self.add_col_btn.config(state="normal", text="A.增一列老料号")
         self.select_btn.config(state="normal")
         sheets = result.get("sheets", 0)
         cols = result.get("columns_added", 0)
@@ -632,8 +709,8 @@ class TranslatorApp:
     def _on_done(self, stats, output_path):
         self.progress.stop()
         self.progress.pack_forget()
-        self.translate_btn.config(state="normal", text="开始翻译")
-        self.add_col_btn.config(state="normal", text="增加老料号列")
+        self.translate_btn.config(state="normal", text="B.原单元格翻译")
+        self.add_col_btn.config(state="normal", text="A.增一列老料号")
         self.select_btn.config(state="normal")
 
         t = stats.get("translated", 0)
@@ -648,8 +725,8 @@ class TranslatorApp:
     def _on_error(self, err_msg):
         self.progress.stop()
         self.progress.pack_forget()
-        self.translate_btn.config(state="normal", text="开始翻译")
-        self.add_col_btn.config(state="normal", text="增加老料号列")
+        self.translate_btn.config(state="normal", text="B.原单元格翻译")
+        self.add_col_btn.config(state="normal", text="A.增一列老料号")
         self.select_btn.config(state="normal")
         messagebox.showerror("翻译失败", f"发生错误：\n{err_msg}")
 
