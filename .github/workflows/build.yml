@@ -23,7 +23,7 @@ jobs:
           pyinstaller --onefile --windowed --clean --noconfirm `
             --icon "icons/icon.ico" `
             --version-file "version_info.txt" `
-            --name "料号翻译工具-V1.4" `
+            --name "料号翻译工具-V1.5" `
             --add-data "mapping.xlsx;." `
             --add-data "icons/icon.ico;icons" `
             --hidden-import xlrd `
@@ -39,5 +39,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 料号翻译工具-Windows-V1.4
-          path: dist/料号翻译工具-V1.4.exe
+          name: 料号翻译工具-Windows-V1.5
+          path: dist/料号翻译工具-V1.5.exe

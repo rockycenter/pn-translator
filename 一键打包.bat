@@ -47,18 +47,18 @@ echo [3/4] 安装依赖...
 
 :: ── 4. 打包 exe ─────────────────────────────────────────
 echo [4/4] 正在打包 exe（约 1-2 分钟）...
-"%PYTHON_DIR%\Scripts\pyinstaller.exe" --onefile --windowed --icon "icons/icon.ico" --version-file "version_info.txt" --name "料号翻译工具-V1.4" --add-data "mapping.xlsx;." --add-data "icons/icon.ico;icons" --hidden-import xlrd gui.py --clean --noconfirm 2>nul
+"%PYTHON_DIR%\Scripts\pyinstaller.exe" --onefile --windowed --icon "icons/icon.ico" --version-file "version_info.txt" --name "料号翻译工具-V1.5" --add-data "mapping.xlsx;." --add-data "icons/icon.ico;icons" --hidden-import xlrd gui.py --clean --noconfirm 2>nul
 
 :: ── 完成 ────────────────────────────────────────────────
-if exist "dist\料号翻译工具-V1.4.exe" (
+if exist "dist\料号翻译工具-V1.5.exe" (
     echo.
     echo   ============================================
     echo     打包成功！
-    echo     exe 位置: dist\料号翻译工具-V1.4.exe
+    echo     exe 位置: dist\料号翻译工具-V1.5.exe
     echo     支持 .xlsx 和 .xls 文件！
     echo   ============================================
     echo.
-    explorer /select,"%~dp0dist\料号翻译工具-V1.4.exe"
+    explorer /select,"%~dp0dist\料号翻译工具-V1.5.exe"
 ) else (
     echo.
     echo   [错误] 打包失败，请尝试：
